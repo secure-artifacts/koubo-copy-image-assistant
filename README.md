@@ -1,20 +1,23 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# 口播文案图片助手
 
-# Run and deploy your AI Studio app
+浏览器端的英文口播文案质检 + 图片匹配工具。纯前端运行，不依赖任何后端服务；Gemini/OpenRouter/Meta AI 的 API Key 由用户在界面里自行填写并保存在浏览器本地（localStorage），不会发送到除对应 AI 服务商以外的任何地方。
 
-This contains everything you need to run your app locally.
+## 本地开发
 
-View your app in AI Studio: https://ai.studio/apps/47dca51f-e993-40d5-b79d-88c53c7d1b6d
+**依赖：** Node.js
 
-## Run Locally
+```bash
+npm install
+npm run dev
+```
 
-**Prerequisites:**  Node.js
+无需配置任何环境变量即可运行；AI 质检功能需要在界面里填入自己的 Gemini（或 OpenRouter / Meta AI）API Key，留空则仅做排版分段。
 
+## 构建
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+```bash
+npm run build            # 多文件产物，输出到 dist/
+npm run build:standalone # 单文件 HTML，输出到 dist-standalone/index.html
+```
+
+`build:standalone` 产出的单个 HTML 文件可以直接用 Chrome 或 Firefox 双击打开运行，无需部署、无需服务器，Windows/Mac 通用。

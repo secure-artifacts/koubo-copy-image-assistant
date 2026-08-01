@@ -13,7 +13,7 @@ export default defineConfig(({mode}) => {
       },
     },
     server: {
-      // HMR is disabled in AI Studio via DISABLE_HMR env var.
+      // Set DISABLE_HMR=true to turn off HMR (useful when an external tool edits files directly).
       hmr: process.env.DISABLE_HMR !== 'true',
     },
   };
