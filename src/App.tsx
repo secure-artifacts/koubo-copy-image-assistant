@@ -5,10 +5,10 @@
 
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
-  Upload, Wand2, Download, RefreshCcw,
-  Image as ImageIcon, Loader2, AlertCircle,
-  Plus, Save, Trash2, CheckCircle2,
-  Layers, Play, X, ChevronRight, ChevronLeft, Settings2,
+  Wand2, Download,
+  Loader2, AlertCircle,
+  Plus, Trash2, CheckCircle2,
+  ChevronRight, ChevronLeft, Settings2,
   Square, CheckSquare, ShieldCheck, Type, Copy, Shuffle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -20,84 +20,6 @@ import {
 } from './utils/imageMatch';
 import { runCopyAudit, parseCopy, hasChinese } from './utils/copyAudit';
 import JSZip from 'jszip';
-
-interface ImageItem {
-  id: string;
-  original: string;
-  result: string | null;
-  status: 'idle' | 'processing' | 'done' | 'error';
-  error?: string;
-  name: string;
-  matchedText?: string;
-  suggestedName?: string;
-  shouldOptimize?: boolean;
-}
-
-interface Skill {
-  id: string;
-  name: string;
-  prompt: string;
-}
-
-// ── Login screen ─────────────────────────────────────────────────────────────
-function LoginScreen({ onSuccess }: { onSuccess: (token: string) => void }) {
-  const [code, setCode] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
-    try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code }),
-      });
-      if (!res.ok) throw new Error('访问码错误，请重试');
-      const data = await res.json();
-      localStorage.setItem('access-token', data.token);
-      window.location.reload();
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-neutral-950 flex items-center justify-center p-4">
-      <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-neutral-800 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <ShieldCheck className="w-8 h-8 text-neutral-300" />
-          </div>
-          <h1 className="text-white text-2xl font-bold">口播工具</h1>
-          <p className="text-neutral-500 text-sm mt-1">请输入访问码继续</p>
-        </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <input
-            type="password"
-            value={code}
-            onChange={e => setCode(e.target.value)}
-            placeholder="访问码"
-            autoFocus
-            className="w-full px-4 py-3 bg-neutral-800 text-white rounded-xl border border-neutral-700 focus:outline-none focus:border-neutral-500 placeholder-neutral-600 text-center text-lg tracking-widest"
-          />
-          {error && <p className="text-red-400 text-sm text-center">{error}</p>}
-          <button
-            type="submit"
-            disabled={loading || !code}
-            className="w-full py-3 bg-white text-black rounded-xl font-semibold hover:bg-neutral-200 transition-all disabled:opacity-40"
-          >
-            {loading ? '验证中...' : '进入'}
-          </button>
-        </form>
-      </div>
-    </div>
-  );
-}
 
 // ── Word-level diff: computes markup from actual original vs corrected text ───
 function buildMarkup(original: string, corrected: string): string {
@@ -126,72 +48,16 @@ function buildMarkup(original: string, corrected: string): string {
 
 // ── Main app ──────────────────────────────────────────────────────────────────
 export default function App() {
-  const [images, setImages] = useState<ImageItem[]>([]);
-  const [skills, setSkills] = useState<Skill[]>([]);
-  const [accessToken, setAccessToken] = useState<string | null>(
-    () => localStorage.getItem('access-token')
-  );
-
-  // Verify stored token on mount
-  useEffect(() => {
-    const token = localStorage.getItem('access-token');
-    if (!token) return;
-    fetch('/api/auth/check', { headers: { 'x-access-token': token } })
-      .then(r => { if (!r.ok) { localStorage.removeItem('access-token'); setAccessToken(null); } })
-      .catch(() => {});
-  }, []);
-
-  // Call the Python backend which uses Vertex AI SDK (no API key needed on Cloud Run)
-  const callGenerateAPI = async (model: string, contents: any, config?: any): Promise<any> => {
-    const token = localStorage.getItem('access-token') || '';
-    const res = await fetch('/api/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-access-token': token },
-      body: JSON.stringify({ model, contents, config }),
-    });
-    if (res.status === 401) {
-      localStorage.removeItem('access-token');
-      setAccessToken(null);
-      throw new Error('登录已过期，请重新输入访问码');
-    }
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(err.detail || `API error ${res.status}`);
-    }
-    return res.json();
-  };
-
-  if (!accessToken) {
-    return <LoginScreen onSuccess={setAccessToken} />;
-  }
-  const [currentPrompt, setCurrentPrompt] = useState('');
-  const [isProcessingAll, setIsProcessingAll] = useState(false);
-  const [shouldStopProcessing, setShouldStopProcessing] = useState(false);
-  const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
-  const [newSkillName, setNewSkillName] = useState('');
-  const [showSkillModal, setShowSkillModal] = useState(false);
-  const [editingSkillId, setEditingSkillId] = useState<string | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
   const [isPasted, setIsPasted] = useState(false);
-  const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
   const [copywriting, setCopywriting] = useState('');
-  const [isMatching, setIsMatching] = useState(false);
-  const [activeModule, setActiveModule] = useState<'match' | 'edit'>('match');
-  const [sidebarTab, setSidebarTab] = useState<'match' | 'queue'>('match');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [isRefining, setIsRefining] = useState(false);
-  const [aiQuestions, setAiQuestions] = useState<string[]>([]);
-  const [aiAnswers, setAiAnswers] = useState<string[]>([]);
-  const [currentAiStep, setCurrentAiStep] = useState<'idle' | 'asking' | 'refining'>('idle');
   const [isAuditing, setIsAuditing] = useState(false);
   const [auditProgress, setAuditProgress] = useState<string | null>(null);
   const [auditError, setAuditError] = useState<string | null>(null);
   const [auditTechnicalError, setAuditTechnicalError] = useState<any>(null);
-  const [currentTraceId, setCurrentTraceId] = useState<string | null>(null);
   const [retryStatus, setRetryStatus] = useState<{ attempt: number; total: number; nextRetryIn: number } | null>(null);
   const [currentBatchSize, setCurrentBatchSize] = useState(15);
   const [activeModelId, setActiveModelId] = useState("gemini-3-flash-preview");
-  const [downloadFolder, setDownloadFolder] = useState('');
   const [customBundleName, setCustomBundleName] = useState('');
   const [auditResults, setAuditResults] = useState<{
     id: string;
@@ -202,8 +68,6 @@ export default function App() {
     qcEnglishHasChinese?: boolean;
   }[]>([]);
   const [auditSkippedAI, setAuditSkippedAI] = useState(false);
-  const [autoMatchWithImages, setAutoMatchWithImages] = useState(false);
-  const [autoOptimizeImages, setAutoOptimizeImages] = useState(false);
   const [selectedAuditOptions, setSelectedAuditOptions] = useState<Set<string>>(new Set(['spelling', 'case', 'punctuation', 'sequence']));
   const [auditInstructions, setAuditInstructions] = useState<Record<string, string>>({
     spelling: `仅纠正明显的拼写错误。
@@ -281,11 +145,7 @@ export default function App() {
   const [geminiModelsError, setGeminiModelsError] = useState<string | null>(null);
   const [selectedGeminiModel, setSelectedGeminiModel] = useState('gemini-2.5-flash');
   const [customMatchingRules, setCustomMatchingRules] = useState('只要情绪不冲突即可，不需要精确意境匹配：严肃/沉重的文案不要配欢笑、搞笑的图，轻松/喜乐的文案不要配悲伤、压抑的图，基调不矛盾即可。例外：如果文案是关于祷告的，就配祷告的图。');
-  const [viewMode, setViewMode] = useState<'grid' | 'edit'>('grid');
   const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
-  const [gridSize, setGridSize] = useState<'sm' | 'md' | 'lg'>('md');
-  const [currentPage, setCurrentPage] = useState(1);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [selectedAuditIds, setSelectedAuditIds] = useState<Set<string>>(new Set());
   const [cardDragOver, setCardDragOver] = useState<string | null>(null);
   const [copiedAuditTextKeys, setCopiedAuditTextKeys] = useState<Set<string>>(new Set());
@@ -302,32 +162,6 @@ export default function App() {
     return m;
   }, [libraryImages]);
   const [lastSaved, setLastSaved] = useState<string | null>(null);
-  
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Check for API key on mount
-  useEffect(() => {
-    const checkKey = async () => {
-      // @ts-ignore
-      if (window.aistudio?.hasSelectedApiKey) {
-        // @ts-ignore
-        const selected = await window.aistudio.hasSelectedApiKey();
-        setHasApiKey(selected);
-      } else {
-        setHasApiKey(true);
-      }
-    };
-    checkKey();
-  }, []);
-
-  const handleSelectKey = async () => {
-    // @ts-ignore
-    if (window.aistudio?.openSelectKey) {
-      // @ts-ignore
-      await window.aistudio.openSelectKey();
-      setHasApiKey(true);
-    }
-  };
 
   // Fetch OpenRouter models on mount
   useEffect(() => {
@@ -390,22 +224,8 @@ export default function App() {
     return () => { cancelled = true; };
   }, [geminiApiKey, matchingEngine]);
 
-  // Load skills and API Keys from localStorage on mount
+  // Load API Keys from localStorage on mount
   useEffect(() => {
-    const savedSkills = localStorage.getItem('image-editor-skills');
-    if (savedSkills) {
-      setSkills(JSON.parse(savedSkills));
-    } else {
-      // Default skills
-      const defaults: Skill[] = [
-        { id: '1', name: '智能提亮', prompt: '在保持自然的前提下，整体调亮图片，增强细节。' },
-        { id: '2', name: '背景模糊', prompt: '保持主体清晰，将背景进行自然的虚化处理。' },
-        { id: '3', name: '风格转换', prompt: '将图片转换为复古胶片风格。' },
-      ];
-      setSkills(defaults);
-      localStorage.setItem('image-editor-skills', JSON.stringify(defaults));
-    }
-
     const savedORKey = localStorage.getItem('openrouter-api-key');
     if (savedORKey) setOpenRouterApiKey(savedORKey);
 
@@ -457,12 +277,6 @@ export default function App() {
     const savedMatchingRules = localStorage.getItem('copy-matcher-matching-rules');
     if (savedMatchingRules) setCustomMatchingRules(savedMatchingRules);
 
-    const savedAutoMatch = localStorage.getItem('copy-matcher-auto-match');
-    if (savedAutoMatch) setAutoMatchWithImages(JSON.parse(savedAutoMatch));
-
-    const savedAutoOptimize = localStorage.getItem('copy-matcher-auto-optimize');
-    if (savedAutoOptimize) setAutoOptimizeImages(JSON.parse(savedAutoOptimize));
-
     const savedEngine = localStorage.getItem('copy-matcher-engine');
     if (savedEngine) setMatchingEngine(savedEngine as 'gemini' | 'openrouter' | 'meta');
 
@@ -471,16 +285,6 @@ export default function App() {
 
     const savedGeminiModel = localStorage.getItem('copy-matcher-gemini-model');
     if (savedGeminiModel) setSelectedGeminiModel(savedGeminiModel);
-
-    const savedImages = localStorage.getItem('copy-matcher-images');
-    if (savedImages) {
-      try {
-        const restored = JSON.parse(savedImages);
-        setImages(Array.isArray(restored) ? restored.filter((x: any) => x?.original) : []);
-      } catch (e) {
-        console.error("Failed to load images from localStorage", e);
-      }
-    }
   }, []);
 
   // Load persisted image-match map from IndexedDB
@@ -548,11 +352,6 @@ export default function App() {
       setLastSaved(new Date().toLocaleTimeString());
     } catch (e) {
       console.warn("Failed to save audit results", e);
-      if (e instanceof Error && e.name === 'QuotaExceededError') {
-        // If quota exceeded, try clearing images to make room for text
-        console.warn("Quota exceeded, clearing images to save text results...");
-        localStorage.removeItem('copy-matcher-images');
-      }
     }
   }, [auditResults]);
 
@@ -590,22 +389,6 @@ export default function App() {
 
   useEffect(() => {
     try {
-      localStorage.setItem('copy-matcher-auto-match', JSON.stringify(autoMatchWithImages));
-    } catch (e) {
-      console.warn("Failed to save auto match setting", e);
-    }
-  }, [autoMatchWithImages]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('copy-matcher-auto-optimize', JSON.stringify(autoOptimizeImages));
-    } catch (e) {
-      console.warn("Failed to save auto optimize setting", e);
-    }
-  }, [autoOptimizeImages]);
-
-  useEffect(() => {
-    try {
       localStorage.setItem('copy-matcher-engine', matchingEngine);
     } catch (e) {
       console.warn("Failed to save engine setting", e);
@@ -628,15 +411,6 @@ export default function App() {
     }
   }, [selectedGeminiModel]);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem('copy-matcher-images', JSON.stringify(images));
-    } catch (e) {
-      // If images are too large for localStorage, we might get a QuotaExceededError
-      console.warn("Images too large to persist in localStorage", e);
-    }
-  }, [images]);
-
   const saveOpenRouterKey = (key: string) => {
     setOpenRouterApiKey(key);
     localStorage.setItem('openrouter-api-key', key);
@@ -650,304 +424,6 @@ export default function App() {
   const saveMetaKey = (key: string) => {
     setMetaApiKey(key);
     localStorage.setItem('meta-api-key', key);
-  };
-
-  const saveSkills = (updatedSkills: Skill[]) => {
-    setSkills(updatedSkills);
-    localStorage.setItem('image-editor-skills', JSON.stringify(updatedSkills));
-  };
-
-  const addFiles = (fileList: FileList | null) => {
-    if (!fileList) return;
-    
-    const files = Array.from(fileList);
-    if (files.length > 0) {
-      const newImages: ImageItem[] = [];
-      let processedCount = 0;
-
-      files.forEach((file: File) => {
-        const reader = new FileReader();
-        const finalize = () => {
-          processedCount++;
-          if (processedCount === files.length && newImages.length > 0) {
-            setImages(prev => [...prev, ...newImages]);
-            if (!selectedImageId) setSelectedImageId(newImages[0].id);
-          }
-        };
-        reader.onload = () => {
-          const result = reader.result;
-          if (typeof result === 'string' && result) {
-            newImages.push({
-              id: Math.random().toString(36).substr(2, 9),
-              original: result,
-              result: null,
-              status: 'idle',
-              name: file.name,
-              shouldOptimize: true
-            });
-          }
-          finalize();
-        };
-        reader.onerror = () => {
-          console.warn(`Failed to read file: ${file.name}`, reader.error);
-          finalize();
-        };
-        reader.readAsDataURL(file);
-      });
-    }
-  };
-
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    addFiles(e.target.files);
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    // Ignore internal image-library drags (handled by the per-row image slot)
-    if (e.dataTransfer.types.includes(INTERNAL_IMAGE_MIME)) return;
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
-    addFiles(e.dataTransfer.files);
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes(INTERNAL_IMAGE_MIME)) return;
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(true);
-  };
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    // Only hide overlay if we're actually leaving the container
-    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-      setIsDragging(false);
-    }
-  };
-
-  const processSingleImage = async (image: ImageItem, prompt: string): Promise<string | null> => {
-    if (!image) return null;
-
-    console.log(`[ImageEditor] Starting processing for: ${image.name}`);
-    setImages(prev => prev.map(img => 
-      img.id === image.id ? { ...img, status: 'processing', error: undefined } : img
-    ));
-
-    // Timeout protection: 60 seconds
-    const timeoutPromise = new Promise((_, reject) => 
-      setTimeout(() => reject(new Error("请求超时：AI 响应时间过长，请检查网络或稍后重试。")), 60000)
-    );
-
-    try {
-      const base64Data = image.original.split(',')[1];
-      const mimeType = image.original.split(';')[0].split(':')[1];
-
-      // Enhanced prompt for fidelity and size preservation
-      const enhancedPrompt = `
-        STRICT INSTRUCTION:
-        1. Preserve the original image's dimensions, resolution, and aspect ratio exactly.
-        2. Keep all parts of the image that are not explicitly mentioned in the request completely identical to the original.
-        3. Do not add any watermarks or borders.
-        4. Output at the highest possible quality.
-        5. Apply the following modification: ${prompt}
-      `;
-
-      console.log(`[ImageEditor] Calling backend API for ${image.name}...`);
-
-      const apiCall = callGenerateAPI(
-        'gemini-3.1-flash-image-preview',
-        { parts: [{ inlineData: { data: base64Data, mimeType } }, { text: enhancedPrompt }] },
-        { imageConfig: { imageSize: "2K" } }
-      );
-
-      // Race the API call against the timeout
-      const response = await Promise.race([apiCall, timeoutPromise]) as any;
-
-      console.log(`[ImageEditor] API Response received for ${image.name}`);
-      
-      let resultUrl: string | null = null;
-      if (response.candidates?.[0]?.content?.parts) {
-        for (const part of response.candidates[0].content.parts) {
-          if (part.inlineData) {
-            resultUrl = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-            break;
-          }
-        }
-      }
-
-      if (resultUrl) {
-        console.log(`[ImageEditor] Successfully processed ${image.name}`);
-        setImages(prev => prev.map(img => 
-          img.id === image.id ? { ...img, result: resultUrl, status: 'done' } : img
-        ));
-        return resultUrl;
-      } else {
-        console.warn(`[ImageEditor] No image data in response for ${image.name}`);
-        throw new Error(response.text || "AI 未能生成修改后的图片。请检查指令是否清晰。");
-      }
-    } catch (err: any) {
-      console.error(`[ImageEditor] Error processing ${image.name}:`, err);
-      
-      let errorMessage = err.message || "处理失败";
-      
-      // Handle specific error cases
-      if (err.message?.includes("entity was not found") || err.message?.includes("not found")) {
-        // Fallback to 2.5 model if 3.1 is not available
-        console.log(`[ImageEditor] Model 3.1 not found, falling back to 2.5 for ${image.name}`);
-        try {
-          const base64Data = image.original.split(',')[1];
-          const mimeType = image.original.split(';')[0].split(':')[1];
-
-          const fallbackResponse = await callGenerateAPI(
-            'gemini-2.5-flash-image',
-            { parts: [
-                { inlineData: { data: base64Data, mimeType } },
-                { text: `STRICT INSTRUCTION: Preserve dimensions and fidelity. Modification: ${prompt}` },
-            ]},
-          );
-
-          let fallbackUrl: string | null = null;
-          if (fallbackResponse.candidates?.[0]?.content?.parts) {
-            for (const part of fallbackResponse.candidates[0].content.parts) {
-              if (part.inlineData) {
-                fallbackUrl = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-                break;
-              }
-            }
-          }
-
-          if (fallbackUrl) {
-            setImages(prev => prev.map(img => 
-              img.id === image.id ? { ...img, result: fallbackUrl, status: 'done' } : img
-            ));
-            return fallbackUrl;
-          }
-        } catch (fallbackErr: any) {
-          console.error(`[ImageEditor] Fallback also failed:`, fallbackErr);
-        }
-        
-        errorMessage = "高清模型不可用或权限不足。请尝试重新授权。";
-        setHasApiKey(false);
-      } else if (err.message?.includes("API key")) {
-        errorMessage = "API 密钥无效或未设置。";
-        setHasApiKey(false);
-      } else if (err.message?.includes("quota") || err.message?.includes("429")) {
-        errorMessage = "达到 API 使用限额。请稍后再试。";
-      } else if (err.message?.includes("safety")) {
-        errorMessage = "请求被安全过滤器拦截。请尝试修改指令。";
-      }
-
-      setImages(prev => prev.map(img => 
-        img.id === image.id ? { ...img, status: 'error', error: errorMessage } : img
-      ));
-      return null;
-    }
-  };
-
-  const processAll = async (force = false) => {
-    if (images.length === 0 || !currentPrompt) return;
-    setIsProcessingAll(true);
-    setShouldStopProcessing(false);
-    
-    console.log(`[ImageEditor] Starting batch processing (force=${force})`);
-    
-    // Process sequentially to avoid rate limits
-    for (const image of images) {
-      if (shouldStopProcessing) {
-        console.log(`[ImageEditor] Batch processing stopped by user`);
-        break;
-      }
-      
-      // If force is true, we process everything. Otherwise only non-done.
-      if (force || image.status !== 'done') {
-        await processSingleImage(image, currentPrompt);
-        // Small delay between requests to be gentle with the API
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-    }
-    
-    console.log(`[ImageEditor] Batch processing completed/stopped`);
-    setIsProcessingAll(false);
-    setShouldStopProcessing(false);
-  };
-
-  const resetAllStatuses = () => {
-    setImages(prev => prev.map(img => ({ ...img, status: 'idle', result: null, error: undefined })));
-  };
-
-  const addSkill = () => {
-    if (!newSkillName || !currentPrompt) return;
-    
-    if (editingSkillId) {
-      const updatedSkills = skills.map(s => 
-        s.id === editingSkillId ? { ...s, name: newSkillName, prompt: currentPrompt } : s
-      );
-      saveSkills(updatedSkills);
-      setEditingSkillId(null);
-    } else {
-      const newSkill: Skill = {
-        id: Math.random().toString(36).substr(2, 9),
-        name: newSkillName,
-        prompt: currentPrompt
-      };
-      saveSkills([...skills, newSkill]);
-    }
-    setNewSkillName('');
-    setShowSkillModal(false);
-    setAiQuestions([]);
-    setAiAnswers([]);
-    setCurrentAiStep('idle');
-  };
-
-  const handleAiRefine = async () => {
-    if (!newSkillName) return;
-    setIsRefining(true);
-    try {
-      const response = await callGenerateAPI(
-        "gemini-3-flash-preview",
-        `用户想要创建一个名为"${newSkillName}"的修图技能。目前的指令构思是："${currentPrompt}"。
-        请作为专业的 AI 图像工程师，提出 2 个非常具体的问题，帮助用户细化这个指令，使其更具专业水准（例如：光影风格、色彩倾向、细节保留程度等）。
-        请直接以 JSON 数组格式返回问题列表，例如：["问题1", "问题2"]。`,
-        { responseMimeType: "application/json" }
-      );
-      const questions = JSON.parse(response.text);
-      setAiQuestions(questions);
-      setAiAnswers(new Array(questions.length).fill(''));
-      setCurrentAiStep('asking');
-    } catch (error) {
-      console.error("AI Refine Error:", error);
-    } finally {
-      setIsRefining(false);
-    }
-  };
-
-  const handleAiFinalize = async () => {
-    setIsRefining(true);
-    try {
-      const context = aiQuestions.map((q, i) => `问：${q}\n答：${aiAnswers[i]}`).join('\n');
-      const response = await callGenerateAPI(
-        "gemini-3-flash-preview",
-        `用户想要创建一个名为"${newSkillName}"的修图技能。
-        原始构思：${currentPrompt}
-        补充细节：
-        ${context}
-
-        请根据以上信息，编写一条极其专业、精准的 AI 图像处理指令（Prompt）。
-        要求：
-        1. 包含具体的艺术风格、光影参数、色彩空间描述。
-        2. 强调保留原始特征的同时进行优化。
-        3. 语言简洁有力，适合作为 AI 模型输入。
-        直接返回最终指令文本，不要包含任何解释。`,
-      );
-      setCurrentPrompt(response.text.trim());
-      setCurrentAiStep('idle');
-      setAiQuestions([]);
-    } catch (error) {
-      console.error("AI Finalize Error:", error);
-    } finally {
-      setIsRefining(false);
-    }
   };
 
   const handlePaste = (e: React.ClipboardEvent) => {
@@ -1165,8 +641,6 @@ export default function App() {
             qcEnglishHasChinese: hasChinese(s.english),
           }));
         setAuditResults(results);
-
-        if (images.length > 0) await matchImagesWithCopy();
       } catch (error: any) {
         const normalized = normalizeError(error);
         setAuditError(normalized.suggestion);
@@ -1198,8 +672,6 @@ export default function App() {
         (batch, total) => setAuditProgress(`${batch} / ${total}`)
       );
       setAuditResults(results);
-
-      if (images.length > 0) await matchImagesWithCopy();
     } catch (error: any) {
       const normalized = normalizeError(error);
       setAuditError(normalized.suggestion);
@@ -1446,325 +918,19 @@ export default function App() {
     ));
   };
 
-  const editSkill = (skill: Skill) => {
-    setEditingSkillId(skill.id);
-    setNewSkillName(skill.name);
-    setCurrentPrompt(skill.prompt);
-    setShowSkillModal(true);
-  };
-
-  const deleteSkill = (id: string) => {
-    saveSkills(skills.filter(s => s.id !== id));
-  };
-
-  const removeImage = (id: string) => {
-    setImages(prev => prev.filter(img => img.id !== id));
-    if (selectedImageId === id) setSelectedImageId(null);
-    const newSelected = new Set(selectedIds);
-    newSelected.delete(id);
-    setSelectedIds(newSelected);
-  };
-
-  const toggleSelection = (id: string) => {
-    const newSelected = new Set(selectedIds);
-    if (newSelected.has(id)) {
-      newSelected.delete(id);
-    } else {
-      newSelected.add(id);
-    }
-    setSelectedIds(newSelected);
-  };
-
-  const toggleSelectAll = () => {
-    if (selectedIds.size === images.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(images.map(img => img.id)));
-    }
-  };
-
-  const downloadSelected = () => {
-    images.forEach(img => {
-      if (selectedIds.has(img.id)) {
-        const link = document.createElement('a');
-        link.href = img.result || img.original;
-        
-        // Use suggestedName (sequence number) if available, otherwise original name
-        let fileName = img.suggestedName ? `${img.suggestedName}.png` : img.name;
-        
-        // Add folder prefix if specified
-        if (downloadFolder) {
-          fileName = `${downloadFolder}/${fileName}`;
-        }
-        
-        link.download = fileName;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      }
-    });
-  };
-
-  const batchProcessAndDownload = async () => {
-    if (images.length === 0) return;
-    setIsProcessingAll(true);
-    setShouldStopProcessing(false);
-    
-    const downloadQueue: { url: string; fileName: string }[] = [];
-
-    for (const image of images) {
-      if (shouldStopProcessing) break;
-      
-      let finalUrl = image.original;
-      let fileName = image.suggestedName ? `${image.suggestedName}.png` : image.name;
-
-      if (image.shouldOptimize && currentPrompt) {
-        // Process with AI
-        const resultUrl = await processSingleImage(image, currentPrompt);
-        if (resultUrl) finalUrl = resultUrl;
-      }
-      
-      // Add folder prefix if specified
-      if (downloadFolder) {
-        fileName = `${downloadFolder}/${fileName}`;
-      }
-
-      downloadQueue.push({ url: finalUrl, fileName });
-      
-      // Small delay between requests to be gentle with the API
-      if (image.shouldOptimize) await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-    
-    setIsProcessingAll(false);
-    
-    // Trigger downloads
-    downloadQueue.forEach(item => {
-      const link = document.createElement('a');
-      link.href = item.url;
-      link.download = item.fileName;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    });
-  };
-
-  const downloadAll = () => {
-    images.forEach(img => {
-      if (img.result) {
-        const link = document.createElement('a');
-        link.href = img.result;
-        const fileName = img.suggestedName ? `${img.suggestedName}.png` : `edited-${img.name}`;
-        link.download = fileName;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      }
-    });
-  };
-
-  const matchImagesWithCopy = async () => {
-    if (images.length === 0 || !copywriting) return;
-    setIsMatching(true);
-    setAuditError(null);
-    setAuditProgress(null);
-
-    try {
-      const batchSize = 5; // Process 5 images at a time to stay within token limits
-      const totalBatches = Math.ceil(images.length / batchSize);
-      
-      for (let i = 0; i < images.length; i += batchSize) {
-        const currentBatchNum = Math.floor(i / batchSize) + 1;
-        setAuditProgress(`${currentBatchNum} / ${totalBatches}`);
-        
-        const currentImagesBatch = images.slice(i, i + batchSize);
-        const imageIndices = Array.from({ length: currentImagesBatch.length }, (_, k) => i + k);
-
-        const prompt = `
-          You are an AI matching tool. I will provide you with a list of ${currentImagesBatch.length} images and a list of copywriting entries.
-          Your task is to match each image with the most appropriate copywriting entry.
-          
-          Copywriting Entries:
-          ${copywriting}
-          
-          Custom Matching Rules:
-          ${customMatchingRules}
-          
-          Rules:
-          1. Each image must be matched to ONE copywriting entry.
-          2. Multiple images can be matched to the same entry if appropriate.
-          3. Note: In the provided text, a new entry starts with a "Number + Tab" (or space if pasted from some sources). 
-             The text following the number is the actual content.
-          4. For each match, suggest a concise and descriptive filename (without extension) based on the copywriting.
-          
-          Return the result as a JSON array of objects:
-          [
-            { "imageIdIndex": ${imageIndices[0]}, "matchedText": "...", "suggestedName": "序号 (例如 1)" },
-            ...
-          ]
-          The imageIdIndex MUST correspond exactly to the indices provided: ${imageIndices.join(', ')}.
-          The suggestedName MUST be the natural number ID from the copywriting entry.
-        `;
-
-      let result: any[] = [];
-
-        // Timeout after 90 seconds for each batch
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error("图片匹配请求超时。")), 150000)
-        );
-
-        const traceId = generateTraceId();
-        setCurrentTraceId(traceId);
-
-        const matchPromise = (async () => {
-          if (matchingEngine === 'gemini') {
-            const imageParts = currentImagesBatch
-              .filter((img) => typeof img.original === 'string' && img.original.startsWith('data:'))
-              .map((img) => ({
-                inlineData: {
-                  data: img.original.split(',')[1],
-                  mimeType: img.original.split(';')[0].split(':')[1]
-                }
-              }));
-
-            const response = await callWithRetry(
-              () => callGenerateAPI(
-                'gemini-3-flash-preview',
-                { parts: [...imageParts, { text: prompt }] },
-                { responseMimeType: "application/json" }
-              ),
-              3, 2000,
-              (attempt, nextIn) => setRetryStatus({ attempt, total: 3, nextRetryIn: nextIn })
-            );
-            return JSON.parse(response.text);
-          } else {
-            // OpenAI-compatible chat completions: OpenRouter or Meta AI.
-            const isMeta = matchingEngine === 'meta';
-            const apiKey = isMeta ? metaApiKey : (openRouterApiKey || getOpenRouterApiKey());
-            if (!apiKey) throw new Error(isMeta ? "请先填写 Meta AI API Key" : "请先填写 OpenRouter API Key");
-            const engineName = isMeta ? "Meta AI" : "OpenRouter";
-            const contentParts: any[] = [ { type: "text", text: prompt } ];
-            currentImagesBatch.forEach(img => {
-              contentParts.push({ type: "image_url", image_url: { url: img.original } });
-            });
-            const headers: Record<string, string> = {
-              "Authorization": `Bearer ${apiKey}`,
-              "Content-Type": "application/json"
-            };
-            if (!isMeta) {
-              headers["HTTP-Referer"] = window.location.origin;
-              headers["X-Title"] = "AI Copy Matcher";
-            }
-            const response = await fetch(isMeta ? META_API_URL : "https://openrouter.ai/api/v1/chat/completions", {
-              method: "POST",
-              headers,
-              body: JSON.stringify({
-                model: isMeta ? META_MODEL_ID : selectedModelId,
-                messages: [{ role: "user", content: contentParts }],
-                response_format: { type: "json_object" }
-              })
-            });
-            if (!response.ok) {
-              const errorData = await response.json();
-              throw new Error(errorData.error?.message || `${engineName} Error: ${response.status}`);
-            }
-            const data = await response.json();
-            if (!data.choices?.[0]?.message?.content) {
-              throw new Error(`${engineName} 返回了空响应。`);
-            }
-            const content = data.choices[0].message.content;
-            const parsed = JSON.parse(content);
-            return Array.isArray(parsed) ? parsed : (parsed.matches || parsed.results || Object.values(parsed)[0]);
-          }
-        })();
-
-        const batchResult = await Promise.race([matchPromise, timeoutPromise]) as any[];
-        setRetryStatus(null);
-        
-        setImages(prev => {
-          const next = [...prev];
-          batchResult.forEach((match: any) => {
-            const idx = match.imageIdIndex;
-            if (idx >= 0 && idx < next.length) {
-              next[idx] = {
-                ...next[idx],
-                matchedText: match.matchedText,
-                suggestedName: match.suggestedName
-              };
-            }
-          });
-          return next;
-        });
-      }
-    } catch (error: any) {
-      const normalized = normalizeError(error);
-      setAuditError(`图片匹配失败: ${normalized.suggestion}`);
-      setAuditTechnicalError(normalized);
-    } finally {
-      setIsMatching(false);
-      setAuditProgress(null);
-      setRetryStatus(null);
-    }
-  };
-
-  const selectedImage = images.find(img => img.id === selectedImageId);
-
   return (
-    <div
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-      className="h-screen bg-neutral-50 text-neutral-900 font-sans selection:bg-blue-100 flex flex-col overflow-hidden"
-    >
+    <div className="h-screen bg-neutral-50 text-neutral-900 font-sans selection:bg-blue-100 flex flex-col overflow-hidden">
       {/* Top Navigation Bar */}
       <header className="h-11 bg-white border-b border-neutral-200 flex items-center px-4 z-40 shrink-0 gap-3">
         <div className="w-6 h-6 bg-blue-600 rounded-lg flex items-center justify-center shrink-0">
           <Type className="w-3.5 h-3.5 text-white" />
         </div>
-        <span className="text-xs font-black text-neutral-700 uppercase tracking-widest">口播工具</span>
+        <span className="text-xs font-black text-neutral-700 uppercase tracking-widest">口播文案图片助手</span>
       </header>
 
       <div className="flex-1 flex overflow-hidden relative">
-        {/* API Key Selection Overlay */}
-        {hasApiKey === false && (
-          <div className="absolute inset-0 z-50 bg-white/90 backdrop-blur-md flex items-center justify-center p-6 text-center">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="max-w-md space-y-6"
-            >
-              <div className="w-20 h-20 bg-blue-600 rounded-3xl flex items-center justify-center mx-auto shadow-xl shadow-blue-200">
-                <Settings2 className="text-white w-10 h-10" />
-              </div>
-              <div className="space-y-2">
-                <h2 className="text-2xl font-bold text-neutral-900">激活高清修图模式</h2>
-                <p className="text-neutral-500 text-sm leading-relaxed">
-                  为了提供 2K/4K 级别的超清修图效果，我们需要您授权使用专业版 API 密钥。
-                </p>
-              </div>
-              <div className="flex flex-col gap-3">
-                <button 
-                  onClick={handleSelectKey}
-                  className="w-full py-4 bg-blue-600 text-white rounded-2xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-100"
-                >
-                  立即授权专业版密钥
-                </button>
-                <a 
-                  href="https://ai.google.dev/gemini-api/docs/billing" 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="text-xs text-blue-600 font-medium hover:underline"
-                >
-                  了解关于计费与密钥的说明
-                </a>
-              </div>
-            </motion.div>
-          </div>
-        )}
-
-        {/* Left Sidebar: Skills & Queue */}
-        {activeModule !== 'audit' && (
-          <>
-          {isSidebarCollapsed && (
+        {/* Left Sidebar */}
+        {isSidebarCollapsed && (
             <button
               onClick={() => setIsSidebarCollapsed(false)}
               className="w-6 bg-white border-r border-y border-neutral-200 rounded-r-lg flex items-center justify-center shrink-0 z-20 hover:bg-blue-50 hover:text-blue-600 transition-colors shadow-sm self-stretch"
@@ -1783,28 +949,7 @@ export default function App() {
               <ChevronLeft className="w-4 h-4" />
             </button>
 
-            {/* Sidebar Tabs */}
-            <div className="flex border-b border-neutral-100">
-              <button 
-                onClick={() => setSidebarTab('match')}
-                className={`flex-1 py-4 text-xs font-bold uppercase tracking-widest transition-all border-b-2 ${
-                  sidebarTab === 'match' ? 'border-blue-600 text-blue-600 bg-blue-50/30' : 'border-transparent text-neutral-400 hover:text-neutral-600 hover:bg-neutral-50/50'
-                }`}
-              >
-                匹配设置
-              </button>
-              <button 
-                onClick={() => setSidebarTab('queue')}
-                className={`flex-1 py-4 text-[10px] font-bold uppercase tracking-widest transition-all border-b-2 ${
-                  sidebarTab === 'queue' ? 'border-blue-600 text-blue-600 bg-blue-50/30' : 'border-transparent text-neutral-400 hover:text-neutral-600 hover:bg-neutral-50/50'
-                }`}
-              >
-                技能 & 队列
-              </button>
-            </div>
-
             <div className="flex-1 overflow-y-auto custom-scrollbar">
-              {sidebarTab === 'match' ? (
                 <div className="p-5 space-y-6">
                   {/* Engine & Key */}
                   <div className="space-y-3">
@@ -1841,22 +986,13 @@ export default function App() {
 
                     {matchingEngine === 'gemini' && (
                       <div className="space-y-2">
-                        <div className="relative">
-                          <input 
-                            type="password"
-                            value={geminiApiKey}
-                            onChange={(e) => saveGeminiKey(e.target.value)}
-                            placeholder="Gemini API Key（留空则仅排版，跳过 AI 质检）"
-                            className="w-full px-3 py-2 rounded-xl border border-neutral-200 text-[10px] outline-none bg-neutral-50 focus:ring-2 focus:ring-blue-500"
-                          />
-                          <button
-                            onClick={handleSelectKey}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-blue-600 hover:bg-blue-50 rounded-md transition-all"
-                            title="从 Google Cloud 项目选择密钥"
-                          >
-                            <RefreshCcw className="w-3 h-3" />
-                          </button>
-                        </div>
+                        <input
+                          type="password"
+                          value={geminiApiKey}
+                          onChange={(e) => saveGeminiKey(e.target.value)}
+                          placeholder="Gemini API Key（留空则仅排版，跳过 AI 质检）"
+                          className="w-full px-3 py-2 rounded-xl border border-neutral-200 text-[10px] outline-none bg-neutral-50 focus:ring-2 focus:ring-blue-500"
+                        />
                         <select
                           value={selectedGeminiModel}
                           onChange={(e) => setSelectedGeminiModel(e.target.value)}
@@ -1875,7 +1011,7 @@ export default function App() {
                           )}
                         </select>
                         <p className="text-[8px] text-neutral-400 px-1">
-                          AI 质检需要你自己的 Gemini API Key（在 Google AI Studio 免费获取）；留空则仅做排版分段、不做 AI 质检。图片匹配留空时使用系统默认密钥。质检模型可在上方下拉选择，最新版排在最上方。
+                          AI 质检需要你自己的 Gemini API Key（可免费申请）；留空则仅做排版分段、不做 AI 质检。质检模型可在上方下拉选择，最新版排在最上方。
                         </p>
                       </div>
                     )}
@@ -1942,47 +1078,6 @@ export default function App() {
                     />
                   </div>
 
-                  {/* Automation Settings */}
-                  <div className="space-y-3 pt-4 border-t border-neutral-100">
-                    <h2 className="text-[10px] font-black text-neutral-400 uppercase tracking-widest flex items-center gap-2">
-                      <CheckSquare className="w-3 h-3" />
-                      自动化设置
-                    </h2>
-                    <div className="flex flex-col gap-2">
-                      <label className="flex items-center gap-2 cursor-pointer group">
-                        <input 
-                          type="checkbox" 
-                          checked={autoMatchWithImages}
-                          onChange={(e) => setAutoMatchWithImages(e.target.checked)}
-                          className="w-4 h-4 rounded border-neutral-300 text-blue-600 focus:ring-blue-500"
-                        />
-                        <span className="text-[10px] font-bold text-neutral-500 group-hover:text-neutral-700 transition-colors">自动匹配图片与文案</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer group">
-                        <input 
-                          type="checkbox" 
-                          checked={autoOptimizeImages}
-                          onChange={(e) => setAutoOptimizeImages(e.target.checked)}
-                          className="w-4 h-4 rounded border-neutral-300 text-blue-600 focus:ring-blue-500"
-                        />
-                        <span className="text-[10px] font-bold text-neutral-500 group-hover:text-neutral-700 transition-colors">匹配后自动执行 AI 优化</span>
-                      </label>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={matchImagesWithCopy}
-                    disabled={isMatching || images.length === 0 || !copywriting}
-                    className={`w-full py-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
-                      isMatching || images.length === 0 || !copywriting
-                        ? 'bg-neutral-100 text-neutral-300 cursor-not-allowed'
-                        : 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-100'
-                    }`}
-                  >
-                    {isMatching ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
-                    开始智能匹配
-                  </button>
-
                   <div className="pt-6 border-t border-neutral-100">
                     <button
                       onClick={() => {
@@ -1998,126 +1093,11 @@ export default function App() {
                     </button>
                   </div>
                 </div>
-              ) : (
-                <div className="flex flex-col h-full">
-                  {/* Pro Tools (Merged from Lab) */}
-                  <div className="p-5 border-b border-neutral-100 bg-neutral-50/30">
-                    <h2 className="text-[10px] font-black text-neutral-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                      <Wand2 className="w-3 h-3" />
-                      实验室 Pro 技能
-                    </h2>
-                    <div className="grid grid-cols-1 gap-2">
-                      {[
-                        { id: 'upscale', name: '超分放大 (Upscaling)', icon: <Layers className="w-3 h-3" />, prompt: '将图片分辨率提升至 4K 级别，并智能补全像素级细节，消除模糊。' },
-                        { id: 'denoise', name: 'AI 降噪/锐化', icon: <RefreshCcw className="w-3 h-3" />, prompt: '消除图片噪点，增强边缘锐度，让画面变得通透清晰。' },
-                        { id: 'relighting', name: '光影重构', icon: <Settings2 className="w-3 h-3" />, prompt: '重新模拟环境光效，增加电影感侧光或夕阳暖光，重塑氛围。' },
-                      ].map(tool => (
-                        <button
-                          key={tool.id}
-                          onClick={() => setCurrentPrompt(tool.prompt)}
-                          className={`flex items-center gap-3 p-2.5 rounded-xl text-left transition-all border ${
-                            currentPrompt === tool.prompt ? 'bg-blue-600 border-blue-600 text-white shadow-md' : 'bg-white border-neutral-100 text-neutral-600 hover:border-blue-300'
-                          }`}
-                        >
-                          <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${currentPrompt === tool.prompt ? 'bg-white/20' : 'bg-neutral-50 text-neutral-400'}`}>
-                            {tool.icon}
-                          </div>
-                          <span className="text-[10px] font-bold truncate">{tool.name}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Custom Skills Section */}
-                  <div className="p-5 border-b border-neutral-100">
-                    <div className="flex items-center justify-between mb-4">
-                      <h2 className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">自定义技能</h2>
-                      <button 
-                        onClick={() => {
-                          setEditingSkillId(null);
-                          setNewSkillName('');
-                          setAiQuestions([]);
-                          setAiAnswers([]);
-                          setCurrentAiStep('idle');
-                          setShowSkillModal(true);
-                        }} 
-                        className="p-1 text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
-                      >
-                        <Plus className="w-4 h-4" />
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      {skills.map(skill => (
-                        <div key={skill.id} className="relative group">
-                          <button
-                            onClick={() => setCurrentPrompt(skill.prompt)}
-                            className={`w-full text-left px-3 py-2 rounded-xl text-[10px] font-bold border transition-all truncate hover:shadow-sm active:scale-95 ${
-                              currentPrompt === skill.prompt ? 'bg-blue-600 border-blue-600 text-white shadow-md shadow-blue-100' : 'bg-white border-neutral-200 text-neutral-600 hover:border-blue-300 hover:bg-neutral-50'
-                            }`}
-                          >
-                            {skill.name}
-                          </button>
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setEditingSkillId(skill.id);
-                              setNewSkillName(skill.name);
-                              setCurrentPrompt(skill.prompt);
-                              setShowSkillModal(true);
-                            }}
-                            className="absolute -top-1 -right-1 w-4 h-4 bg-white border border-neutral-200 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all shadow-sm hover:text-blue-600"
-                          >
-                            <Settings2 className="w-2.5 h-2.5" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Queue Section */}
-                  <div className="flex-1 flex flex-col min-h-0">
-                    <div className="p-5 border-b border-neutral-100 flex items-center justify-between bg-neutral-50/50">
-                      <h2 className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">图片队列 ({images.length})</h2>
-                      <button onClick={() => fileInputRef.current?.click()} className="text-blue-600">
-                        <Plus className="w-4 h-4" />
-                      </button>
-                    </div>
-                    <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
-                      {images.map(img => (
-                        <div 
-                          key={img.id}
-                          onClick={() => { setSelectedImageId(img.id); setViewMode('edit'); }}
-                          className={`p-2 rounded-xl border transition-all cursor-pointer flex items-center gap-3 group hover:scale-[1.02] hover:shadow-sm ${
-                            selectedImageId === img.id ? 'bg-blue-50 border-blue-200 shadow-inner' : 'bg-white border-neutral-100 hover:border-neutral-200'
-                          }`}
-                        >
-                          <div className="w-10 h-10 rounded-lg overflow-hidden shrink-0 relative">
-                            <img src={img.original} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                            {img.status === 'processing' && <div className="absolute inset-0 bg-black/40 flex items-center justify-center"><Loader2 className="w-3 h-3 text-white animate-spin" /></div>}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-[10px] font-bold truncate">{img.name}</p>
-                            <div className={`w-1.5 h-1.5 rounded-full ${
-                              img.status === 'done' ? 'bg-green-500' : img.status === 'processing' ? 'bg-blue-500' : 'bg-neutral-300'
-                            }`} />
-                          </div>
-                          <button onClick={(e) => { e.stopPropagation(); removeImage(img.id); }} className="p-1 text-neutral-300 hover:text-red-500 opacity-0 group-hover:opacity-100">
-                            <X className="w-3 h-3" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           </aside>
-          </>
-        )}
 
         {/* Main Content Area */}
         <main className="flex-1 flex flex-col bg-neutral-50 overflow-hidden">
-          {activeModule === 'match' ? (
             <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
               <div className="max-w-4xl mx-auto space-y-4">
                 {/* Audit & Match Section */}
@@ -2206,9 +1186,9 @@ export default function App() {
                     <div className="flex gap-3">
                       <button
                         onClick={() => handleAuditCopy()}
-                        disabled={isAuditing || isMatching || !copywriting}
+                        disabled={isAuditing || !copywriting}
                         className={`flex-[3] py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow active:scale-[0.98] text-sm ${
-                          isAuditing || isMatching || !copywriting
+                          isAuditing || !copywriting
                             ? 'bg-neutral-100 text-neutral-400 cursor-not-allowed shadow-none'
                             : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-100'
                         }`}
@@ -2228,17 +1208,10 @@ export default function App() {
                               <span className="text-[9px] opacity-70">已自动降级至备选模型加速处理</span>
                             )}
                           </div>
-                        ) : isMatching ? (
-                          <>
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            正在匹配 {auditProgress ? `(${auditProgress})` : ''}...
-                          </>
                         ) : (
                           <>
                             <ShieldCheck className="w-4 h-4" />
-                            {hasAuditKey
-                              ? (images.length > 0 ? '开始质检 & 匹配' : '开始质检')
-                              : (images.length > 0 ? '仅排版 & 匹配（未填 Key）' : '仅排版（未填 Key，跳过质检）')}
+                            {hasAuditKey ? '开始质检' : '仅排版（未填 Key，跳过质检）'}
                           </>
                         )}
                       </button>
@@ -2551,359 +1524,6 @@ export default function App() {
                 )}
               </div>
             </div>
-          ) : (
-            <>
-              {/* Global Prompt Bar */}
-              <div className="p-4 bg-white border-b border-neutral-200 shadow-sm z-10">
-                <div className="max-w-[1800px] mx-auto flex gap-4 items-center">
-                  {isSidebarCollapsed && (
-                    <button 
-                      onClick={() => setIsSidebarCollapsed(false)}
-                      className="p-2 hover:bg-neutral-100 rounded-xl transition-colors text-neutral-400"
-                    >
-                      <Settings2 className="w-5 h-5" />
-                    </button>
-                  )}
-                  <div className="flex-1 relative">
-                    <textarea
-                      value={currentPrompt}
-                      onChange={(e) => setCurrentPrompt(e.target.value)}
-                      placeholder={activeModule === 'match' ? "输入匹配逻辑或修图指令..." : "输入修图指令，例如：提亮背景并增强人物细节..."}
-                      className="w-full h-12 px-4 py-2.5 rounded-xl border border-neutral-200 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none resize-none text-sm leading-relaxed pr-10"
-                    />
-                    <div className="absolute right-3 top-3.5 text-neutral-300">
-                      <Wand2 className="w-5 h-5" />
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    {isProcessingAll ? (
-                      <button 
-                        onClick={() => setShouldStopProcessing(true)}
-                        className="px-6 h-12 rounded-xl font-bold flex items-center justify-center gap-2 transition-all bg-red-50 text-red-600 hover:bg-red-100"
-                      >
-                        <X className="w-5 h-5" />
-                        停止
-                      </button>
-                    ) : (
-                      <>
-                        <button 
-                          onClick={() => processAll(false)}
-                          disabled={images.length === 0 || !currentPrompt}
-                          className={`px-8 h-12 rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-lg active:scale-95 ${
-                            images.length === 0 || !currentPrompt
-                              ? 'bg-neutral-100 text-neutral-400 cursor-not-allowed shadow-none'
-                              : 'bg-blue-600 text-white hover:bg-blue-700 hover:shadow-blue-200 hover:-translate-y-0.5 shadow-blue-100'
-                          }`}
-                        >
-                          <Play className="w-5 h-5" />
-                          批量处理
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {viewMode === 'grid' ? (
-                <div className="flex-1 flex flex-col overflow-hidden">
-                  {/* Grid Header */}
-                  <div className="px-8 py-4 flex items-center justify-between bg-neutral-50/50 border-b border-neutral-200">
-                    <div className="flex items-center gap-6">
-                      <button 
-                        onClick={toggleSelectAll}
-                        className="flex items-center gap-2 text-xs font-bold text-neutral-500 hover:text-blue-600 transition-colors"
-                      >
-                        {selectedIds.size === images.length && images.length > 0 ? (
-                          <CheckSquare className="w-5 h-5 text-blue-600" />
-                        ) : (
-                          <Square className="w-5 h-5" />
-                        )}
-                        全选 ({selectedIds.size}/{images.length})
-                      </button>
-                      <div className="flex items-center gap-2 bg-white border border-neutral-200 px-3 py-1.5 rounded-xl shadow-sm">
-                        <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-tight">下载文件夹:</span>
-                        <input 
-                          type="text" 
-                          value={downloadFolder}
-                          onChange={(e) => setDownloadFolder(e.target.value)}
-                          placeholder="例如: output"
-                          className="text-[10px] font-bold text-neutral-700 outline-none w-24"
-                        />
-                      </div>
-                      <button 
-                        onClick={batchProcessAndDownload}
-                        disabled={isProcessingAll || images.length === 0}
-                        className="px-6 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-all flex items-center gap-2 shadow-lg shadow-blue-100 active:scale-95 disabled:bg-neutral-200 disabled:shadow-none"
-                      >
-                        {isProcessingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-                        批量处理并下载
-                      </button>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <div className="flex items-center bg-white border border-neutral-200 p-1 rounded-xl shadow-sm">
-                        {['sm', 'md', 'lg'].map((size) => (
-                          <button 
-                            key={size}
-                            onClick={() => setGridSize(size as any)}
-                            className={`px-4 py-1.5 rounded-lg text-[10px] font-bold transition-all ${gridSize === size ? 'bg-blue-600 text-white' : 'text-neutral-400 hover:text-neutral-600'}`}
-                          >
-                            {size === 'sm' ? '小' : size === 'md' ? '中' : '大'}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Grid Content */}
-                  <div className="flex-1 overflow-y-auto p-8 custom-scrollbar">
-                    {images.length === 0 ? (
-                      <div className="h-full flex flex-col items-center justify-center text-center opacity-40">
-                        <ImageIcon className="w-20 h-20 mb-4 text-neutral-200" />
-                        <p className="text-lg font-bold text-neutral-400">拖拽图片到此处开始</p>
-                      </div>
-                    ) : (
-                      <div className="max-w-[1600px] mx-auto space-y-8">
-                        <div className={`grid gap-8 ${
-                          gridSize === 'sm' ? 'grid-cols-2 md:grid-cols-4 lg:grid-cols-6' :
-                          gridSize === 'md' ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' :
-                          'grid-cols-1 md:grid-cols-2'
-                        }`}>
-                          {images.slice((currentPage - 1) * 12, currentPage * 12).map(img => (
-                            <motion.div 
-                              key={img.id}
-                              layout
-                              whileHover={{ y: -8, transition: { duration: 0.2 } }}
-                              className="bg-white rounded-3xl border border-neutral-200 shadow-sm overflow-hidden group hover:shadow-2xl hover:border-blue-200 transition-all flex flex-col"
-                            >
-                              {/* Image Area */}
-                              <div className="aspect-square relative bg-neutral-100 overflow-hidden cursor-pointer" onClick={() => { setSelectedImageId(img.id); setViewMode('edit'); }}>
-                                <img 
-                                  src={img.result || img.original} 
-                                  className="w-full h-full object-contain" 
-                                  referrerPolicy="no-referrer" 
-                                />
-                                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-all flex items-center justify-center">
-                                  <Wand2 className="text-white opacity-0 group-hover:opacity-100 w-8 h-8 transition-all" />
-                                </div>
-                                <button 
-                                  onClick={(e) => { e.stopPropagation(); toggleSelection(img.id); }}
-                                  className="absolute top-4 left-4 p-1 bg-white/90 backdrop-blur-sm rounded-lg shadow-md hover:scale-110 transition-all"
-                                >
-                                  {selectedIds.has(img.id) ? (
-                                    <CheckSquare className="w-6 h-6 text-blue-600" />
-                                  ) : (
-                                    <Square className="w-6 h-6 text-neutral-300" />
-                                  )}
-                                </button>
-                                {img.status === 'processing' && (
-                                  <div className="absolute inset-0 bg-white/60 backdrop-blur-sm flex items-center justify-center">
-                                    <Loader2 className="w-8 h-8 text-blue-600 animate-spin" />
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* Text Area */}
-                              <div className="p-5 flex-1 flex flex-col gap-3 bg-white border-t border-neutral-100">
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-2">
-                                    <span className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">匹配文案</span>
-                                    {img.matchedText && (
-                                      <span className={`text-[9px] font-bold bg-neutral-50 px-1.5 py-0.5 rounded-full border border-neutral-100 ${getCharCountColor(img.matchedText.length)}`}>
-                                        {img.matchedText.length} 字符
-                                      </span>
-                                    )}
-                                  </div>
-                                  <label className="flex items-center gap-1.5 cursor-pointer group/opt">
-                                    <input 
-                                      type="checkbox" 
-                                      checked={img.shouldOptimize}
-                                      onChange={(e) => {
-                                        setImages(prev => prev.map(i => i.id === img.id ? { ...i, shouldOptimize: e.target.checked } : i));
-                                      }}
-                                      className="w-3 h-3 rounded border-neutral-300 text-blue-600 focus:ring-blue-500"
-                                    />
-                                    <span className="text-[9px] font-bold text-neutral-400 group-hover/opt:text-blue-600 transition-colors">AI 优化</span>
-                                  </label>
-                                </div>
-                                <div className="h-24 overflow-y-auto custom-scrollbar pr-1">
-                                  <p className="text-xs text-neutral-600 leading-relaxed italic whitespace-pre-wrap">
-                                    {img.matchedText || "尚未匹配文案..."}
-                                  </p>
-                                </div>
-                                <div className="pt-3 border-t border-neutral-50 flex items-center justify-between">
-                                  <span className="text-[9px] font-bold text-neutral-300 truncate max-w-[120px]">
-                                    {img.suggestedName || img.name}
-                                  </span>
-                                  <button 
-                                    onClick={() => { setSelectedImageId(img.id); setViewMode('edit'); }}
-                                    className="text-[10px] font-bold text-blue-600 hover:underline"
-                                  >
-                                    编辑
-                                  </button>
-                                </div>
-                              </div>
-                            </motion.div>
-                          ))}
-                        </div>
-
-                        {/* Pagination */}
-                        {images.length > 12 && (
-                          <div className="flex items-center justify-center gap-4 pt-8">
-                            <button 
-                              disabled={currentPage === 1}
-                              onClick={() => setCurrentPage(prev => prev - 1)}
-                              className="p-2 rounded-xl border border-neutral-200 bg-white disabled:opacity-30 hover:bg-white hover:border-blue-400 hover:text-blue-600 hover:shadow-md active:scale-90 transition-all"
-                            >
-                              <ChevronLeft className="w-5 h-5" />
-                            </button>
-                            <span className="text-sm font-bold text-neutral-500">
-                              第 {currentPage} / {Math.ceil(images.length / 12)} 页
-                            </span>
-                            <button 
-                              disabled={currentPage === Math.ceil(images.length / 12)}
-                              onClick={() => setCurrentPage(prev => prev + 1)}
-                              className="p-2 rounded-xl border border-neutral-200 bg-white disabled:opacity-30 hover:bg-white hover:border-blue-400 hover:text-blue-600 hover:shadow-md active:scale-90 transition-all"
-                            >
-                              <ChevronRight className="w-5 h-5" />
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="flex-1 flex flex-col overflow-hidden">
-                  {/* Edit Header */}
-                  <div className="p-6 bg-white border-b border-neutral-200 flex items-center justify-between shadow-sm z-10">
-                    <button 
-                      onClick={() => setViewMode('grid')}
-                      className="flex items-center gap-2 text-sm font-bold text-neutral-600 hover:text-blue-600 transition-colors"
-                    >
-                      <ChevronLeft className="w-5 h-5" />
-                      返回列表
-                    </button>
-                    <div className="flex items-center gap-4">
-                      <span className="text-xs font-bold text-neutral-400 uppercase tracking-widest">编辑模式</span>
-                    </div>
-                  </div>
-
-                  {/* Preview Area (Editor) */}
-                  <div 
-                    className="flex-1 overflow-y-auto p-8 flex flex-col items-center custom-scrollbar transition-colors relative"
-                  >
-                    <AnimatePresence mode="wait">
-                      {!selectedImage ? (
-                        <motion.div 
-                          key="empty"
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          className="flex flex-col items-center justify-center h-full text-center max-w-md"
-                        >
-                          <div className="w-24 h-24 bg-white rounded-3xl shadow-xl flex items-center justify-center mb-6 border border-neutral-100">
-                            <ImageIcon className="text-neutral-200 w-12 h-12" />
-                          </div>
-                          <h3 className="text-xl font-bold text-neutral-800 mb-2">未选择图片</h3>
-                          <p className="text-neutral-500 text-sm leading-relaxed">
-                            请返回列表选择一张图片进行编辑。
-                          </p>
-                          <button 
-                            onClick={() => setViewMode('grid')}
-                            className="mt-8 px-6 py-3 bg-white border border-neutral-200 rounded-xl text-sm font-bold text-neutral-700 hover:bg-neutral-50 transition-all shadow-sm"
-                          >
-                            返回列表
-                          </button>
-                        </motion.div>
-                      ) : (
-                        <motion.div 
-                          key={selectedImage.id}
-                          initial={{ opacity: 0, scale: 0.99 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          className="w-full max-w-[1800px] grid grid-cols-1 md:grid-cols-2 gap-6"
-                        >
-                          {/* Original */}
-                          <div className="space-y-3">
-                            <div className="flex items-center justify-between px-2">
-                              <div className="flex items-center gap-2">
-                                <span className="text-[10px] font-black text-neutral-400 uppercase tracking-[0.2em]">原始图片</span>
-                                <span className="text-[10px] font-medium text-neutral-300 bg-neutral-100 px-2 py-0.5 rounded-full">{selectedImage.name}</span>
-                              </div>
-                            </div>
-                            <div className="aspect-square md:aspect-auto md:h-[820px] bg-white rounded-[2rem] border border-neutral-200 shadow-sm overflow-hidden flex items-center justify-center p-2 group relative">
-                              <img src={selectedImage.original} className="max-w-full max-h-full object-contain rounded-2xl transition-transform duration-500 group-hover:scale-[1.02]" referrerPolicy="no-referrer" />
-                              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-all pointer-events-none" />
-                            </div>
-                          </div>
-
-                          {/* Result */}
-                          <div className="space-y-3">
-                            <div className="flex items-center justify-between px-2">
-                              <span className="text-[10px] font-black text-blue-500 uppercase tracking-[0.2em]">处理结果</span>
-                              {selectedImage.result && (
-                                <button 
-                                  onClick={() => {
-                                    const link = document.createElement('a');
-                                    link.href = selectedImage.result!;
-                                    const fileName = selectedImage.suggestedName ? `${selectedImage.suggestedName}.png` : `edited-${selectedImage.name}`;
-                                    link.download = fileName;
-                                    link.click();
-                                  }}
-                                  className="text-blue-600 hover:text-blue-700 text-[10px] font-bold flex items-center gap-1 bg-blue-50 px-3 py-1 rounded-full transition-all"
-                                >
-                                  <Download className="w-3 h-3" /> 下载高清原图
-                                </button>
-                              )}
-                            </div>
-                            <div className="aspect-square md:aspect-auto md:h-[820px] bg-white rounded-[2rem] border border-neutral-200 shadow-sm overflow-hidden flex items-center justify-center p-2 relative group">
-                              {selectedImage.status === 'processing' ? (
-                                <div className="flex flex-col items-center gap-4">
-                                  <div className="relative">
-                                    <Loader2 className="w-12 h-12 text-blue-600 animate-spin" />
-                                    <div className="absolute inset-0 flex items-center justify-center">
-                                      <div className="w-2 h-2 bg-blue-600 rounded-full animate-ping" />
-                                    </div>
-                                  </div>
-                                  <p className="text-xs font-bold text-neutral-400 animate-pulse tracking-widest">正在重构像素级细节...</p>
-                                </div>
-                              ) : selectedImage.result ? (
-                                <div className="relative w-full h-full flex items-center justify-center">
-                                  <img src={selectedImage.result} className="max-w-full max-h-full object-contain rounded-2xl transition-transform duration-500 group-hover:scale-[1.02]" referrerPolicy="no-referrer" />
-                                  <div className="absolute bottom-6 right-6 flex gap-2 opacity-0 group-hover:opacity-100 transition-all translate-y-2 group-hover:translate-y-0">
-                                    <button 
-                                      onClick={() => processSingleImage(selectedImage, currentPrompt)}
-                                      className="px-6 py-3 bg-white/95 backdrop-blur-md border border-neutral-200 rounded-2xl text-xs font-bold text-neutral-700 hover:bg-white transition-all shadow-2xl flex items-center gap-2"
-                                    >
-                                      <RefreshCcw className="w-4 h-4" /> 重新生成
-                                    </button>
-                                  </div>
-                                </div>
-                              ) : selectedImage.status === 'error' ? (
-                                <div className="flex flex-col items-center gap-4 text-center p-8">
-                                  <AlertCircle className="w-12 h-12 text-red-400" />
-                                  <p className="text-sm font-bold text-red-500">{selectedImage.error}</p>
-                                  <button 
-                                    onClick={() => processSingleImage(selectedImage, currentPrompt)}
-                                    className="px-6 py-2 bg-red-50 text-red-600 rounded-xl text-xs font-bold hover:bg-red-100 transition-all"
-                                  >
-                                    立即重试
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="flex flex-col items-center gap-4 opacity-20">
-                                  <Wand2 className="w-16 h-16 text-neutral-300" />
-                                  <p className="text-sm font-bold text-neutral-400 tracking-widest">准备就绪，点击"批量处理"开始</p>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
         </main>
         <ImageLibrary
           matchMap={matchMap}
@@ -2915,153 +1535,6 @@ export default function App() {
           onVoiceSpeed={setVoiceSpeed}
         />
       </div>
-
-      {/* Skill Modal */}
-      <AnimatePresence>
-        {showSkillModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => {
-                setShowSkillModal(false);
-                setEditingSkillId(null);
-                setNewSkillName('');
-                setAiQuestions([]);
-                setAiAnswers([]);
-                setCurrentAiStep('idle');
-              }}
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="relative w-full max-w-lg bg-white rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
-            >
-              <div className="p-8 overflow-y-auto custom-scrollbar">
-                <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <h3 className="text-2xl font-bold text-neutral-900">{editingSkillId ? '优化技能' : '创建新技能'}</h3>
-                    <p className="text-neutral-400 text-xs mt-1 font-medium tracking-wide">CRAFTING PROFESSIONAL AI SKILLS</p>
-                  </div>
-                  <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600">
-                    <Wand2 className="w-6 h-6" />
-                  </div>
-                </div>
-                
-                <div className="space-y-6">
-                  <div>
-                    <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest mb-2 block">技能名称</label>
-                    <input 
-                      type="text"
-                      value={newSkillName}
-                      onChange={(e) => setNewSkillName(e.target.value)}
-                      placeholder="例如：复古胶片感、极简白底图..."
-                      className="w-full px-5 py-4 rounded-2xl border border-neutral-200 focus:ring-2 focus:ring-blue-500 outline-none text-sm font-bold bg-neutral-50/50"
-                    />
-                  </div>
-
-                  {currentAiStep === 'idle' ? (
-                    <div className="space-y-4">
-                      <div>
-                        <div className="flex items-center justify-between mb-2">
-                          <label className="text-[10px] font-black text-neutral-400 uppercase tracking-widest block">核心指令构思</label>
-                          <button 
-                            onClick={handleAiRefine}
-                            disabled={!newSkillName || isRefining}
-                            className="text-[10px] font-bold text-blue-600 flex items-center gap-1.5 hover:bg-blue-50 px-3 py-1 rounded-full transition-all disabled:opacity-30"
-                          >
-                            {isRefining ? <Loader2 className="w-3 h-3 animate-spin" /> : <Settings2 className="w-3 h-3" />}
-                            AI 助手协助优化
-                          </button>
-                        </div>
-                        <textarea 
-                          value={currentPrompt}
-                          onChange={(e) => setCurrentPrompt(e.target.value)}
-                          placeholder="输入您的初步想法，或者让 AI 帮您完善..."
-                          className="w-full px-5 py-4 rounded-2xl border border-neutral-200 focus:ring-2 focus:ring-blue-500 outline-none text-xs text-neutral-600 italic leading-relaxed min-h-[120px] resize-none bg-neutral-50/50"
-                        />
-                      </div>
-                    </div>
-                  ) : (
-                    <motion.div 
-                      initial={{ opacity: 0, x: 20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      className="bg-blue-50/50 rounded-3xl p-6 border border-blue-100 space-y-5"
-                    >
-                      <div className="flex items-center gap-3 mb-2">
-                        <div className="w-8 h-8 bg-blue-600 rounded-xl flex items-center justify-center text-white">
-                          <Wand2 className="w-4 h-4" />
-                        </div>
-                        <p className="text-xs font-bold text-blue-900">AI 助手正在为您细化技能...</p>
-                      </div>
-                      
-                      {aiQuestions.map((q, i) => (
-                        <div key={i} className="space-y-2">
-                          <p className="text-[11px] font-bold text-neutral-500 leading-relaxed">{q}</p>
-                          <input 
-                            type="text"
-                            value={aiAnswers[i]}
-                            onChange={(e) => {
-                              const newAnswers = [...aiAnswers];
-                              newAnswers[i] = e.target.value;
-                              setAiAnswers(newAnswers);
-                            }}
-                            placeholder="您的回答..."
-                            className="w-full px-4 py-3 rounded-xl border border-blue-200 focus:ring-2 focus:ring-blue-500 outline-none text-xs bg-white"
-                          />
-                        </div>
-                      ))}
-
-                      <div className="flex gap-2 pt-2">
-                        <button 
-                          onClick={handleAiFinalize}
-                          disabled={isRefining || aiAnswers.some(a => !a)}
-                          className="flex-1 py-3 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition-all flex items-center justify-center gap-2"
-                        >
-                          {isRefining ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-                          生成专业指令
-                        </button>
-                        <button 
-                          onClick={() => setCurrentAiStep('idle')}
-                          className="px-4 py-3 bg-white border border-blue-200 text-blue-600 rounded-xl text-xs font-bold hover:bg-blue-50 transition-all"
-                        >
-                          返回
-                        </button>
-                      </div>
-                    </motion.div>
-                  )}
-                </div>
-
-                <div className="flex gap-3 mt-10">
-                  <button 
-                    onClick={() => {
-                      setShowSkillModal(false);
-                      setEditingSkillId(null);
-                      setNewSkillName('');
-                      setAiQuestions([]);
-                      setAiAnswers([]);
-                      setCurrentAiStep('idle');
-                    }}
-                    className="flex-1 py-4 text-sm font-bold text-neutral-400 hover:text-neutral-600 transition-colors"
-                  >
-                    取消
-                  </button>
-                  <button 
-                    onClick={addSkill}
-                    disabled={!newSkillName || !currentPrompt}
-                    className="flex-[2] py-4 bg-neutral-900 text-white rounded-2xl font-bold hover:bg-black transition-all shadow-xl shadow-neutral-200 disabled:opacity-30"
-                  >
-                    {editingSkillId ? '更新技能' : '保存技能'}
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
       {/* Audit Option Modal */}
       <AnimatePresence>
@@ -3157,38 +1630,6 @@ export default function App() {
               </div>
             </motion.div>
           </div>
-        )}
-      </AnimatePresence>
-
-      {/* Hidden File Input */}
-      <input 
-        type="file" 
-        ref={fileInputRef} 
-        onChange={handleImageUpload} 
-        accept="image/*" 
-        multiple 
-        className="hidden" 
-      />
-
-      {/* Drag and Drop Overlay */}
-      <AnimatePresence>
-        {isDragging && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] bg-blue-600/90 backdrop-blur-sm flex flex-col items-center justify-center text-white p-12 text-center"
-          >
-            <motion.div
-              initial={{ scale: 0.8, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              className="w-32 h-32 bg-white/20 rounded-full flex items-center justify-center mb-8 border-4 border-white/40 border-dashed animate-pulse"
-            >
-              <Upload className="w-16 h-16" />
-            </motion.div>
-            <h2 className="text-4xl font-black mb-4 tracking-tight">释放以上传图片</h2>
-            <p className="text-blue-100 text-lg font-medium">支持批量拖拽，即刻开始 AI 智能匹配与修图</p>
-          </motion.div>
         )}
       </AnimatePresence>
 
