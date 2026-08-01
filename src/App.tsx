@@ -73,7 +73,7 @@ export default function App() {
     spelling: `仅纠正明显的拼写错误。
 注意以下情况【不需要修改】：
 - 圣经经文引用：不修改任何引用自圣经版本（KJV、NIV、ESV、NKJV 等）的文字，各版本有各自的用词规范。
-- 全大写单词（如 AMEN、HALLELUJAH、LORD、JESUS、HOLY）：这是口语强调写法，保持原样。
+- 全大写单词（如 AMEN、HALLELUJAH、LORD、JESUS、HOLY）：改为首字母大写（Title Case），例如 AMEN → Amen、HALLELUJAH → Hallelujah。
 - 口语化缩写或非正式拼写（如 gonna、wanna、gotta）：口语文案，保持原样。
 - 英式与美式拼写差异（如 Saviour/Savior、favour/favor、honour/honor、Alleluia/Hallelujah）：两种拼写均正确，不互相纠正。
 - prophesy（动词）与 prophecy（名词）：词性不同，如两者混用则纠正，但各自本身拼写正确。
@@ -102,7 +102,7 @@ export default function App() {
    - 神学概念：Trinity、Resurrection、Ascension、Gospel、Cross、Heaven（指神居所时）、Kingdom（指神的国度时）、Church（指普世教会整体时）、Scripture、Bible、Word（指圣经或约翰福音"道成肉身"时）
 
 【绝对不改的情况】
-- 全大写单词（AMEN、HALLELUJAH、PRAISE、LORD 等）：口语强调写法，保持原样。
+- 全大写单词（AMEN、HALLELUJAH、PRAISE、LORD 等）：改为首字母大写（Title Case），例如 AMEN → Amen、LORD → Lord（但圣经引用中的 LORD 不改）。
 - 任何无法100%确认指代对象的代词：不改。
 - 圣经版本引用中的任何词：不改。
 - 介词搭配：不修改。`,
@@ -144,7 +144,6 @@ export default function App() {
   const [geminiModels, setGeminiModels] = useState<{ id: string; label: string }[]>([]);
   const [geminiModelsError, setGeminiModelsError] = useState<string | null>(null);
   const [selectedGeminiModel, setSelectedGeminiModel] = useState('gemini-2.5-flash');
-  const [customMatchingRules, setCustomMatchingRules] = useState('只要情绪不冲突即可，不需要精确意境匹配：严肃/沉重的文案不要配欢笑、搞笑的图，轻松/喜乐的文案不要配悲伤、压抑的图，基调不矛盾即可。例外：如果文案是关于祷告的，就配祷告的图。');
   const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
   const [selectedAuditIds, setSelectedAuditIds] = useState<Set<string>>(new Set());
   const [cardDragOver, setCardDragOver] = useState<string | null>(null);
@@ -274,9 +273,6 @@ export default function App() {
       }
     }
 
-    const savedMatchingRules = localStorage.getItem('copy-matcher-matching-rules');
-    if (savedMatchingRules) setCustomMatchingRules(savedMatchingRules);
-
     const savedEngine = localStorage.getItem('copy-matcher-engine');
     if (savedEngine) setMatchingEngine(savedEngine as 'gemini' | 'openrouter' | 'meta');
 
@@ -379,13 +375,6 @@ export default function App() {
     }
   }, [auditInstructions]);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem('copy-matcher-matching-rules', customMatchingRules);
-    } catch (e) {
-      console.warn("Failed to save matching rules", e);
-    }
-  }, [customMatchingRules]);
 
   useEffect(() => {
     try {
@@ -796,7 +785,7 @@ export default function App() {
   };
 
   const [isBundling, setIsBundling] = useState(false);
-  const [unmatchedWarning, setUnmatchedWarning] = useState<{ format: 'tsv' | 'json'; ids: string[] } | null>(null);
+  const [unmatchedWarning, setUnmatchedWarning] = useState<{ ids: string[] } | null>(null);
 
   const randomMatch = () => {
     if (libraryImages.length === 0) {
@@ -820,17 +809,17 @@ export default function App() {
     });
   };
 
-  const bundleDownload = (format: 'tsv' | 'json') => {
+  const bundleDownload = () => {
     if (auditResults.length === 0 || isBundling) return;
     const unmatchedIds = auditResults.filter(r => !fileByName[matchMap[r.id]]).map(r => r.id);
     if (unmatchedIds.length > 0) {
-      setUnmatchedWarning({ format, ids: unmatchedIds });
+      setUnmatchedWarning({ ids: unmatchedIds });
       return;
     }
-    performBundleDownload(format);
+    performBundleDownload();
   };
 
-  const performBundleDownload = async (format: 'tsv' | 'json') => {
+  const performBundleDownload = async () => {
     if (auditResults.length === 0 || isBundling) return;
     setIsBundling(true);
 
@@ -839,24 +828,11 @@ export default function App() {
       const ts = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '');
 
       // 1. copy file
-      if (format === 'tsv') {
-        const header = `voice_id\t${voiceId}\nvoice_engine\t${voiceEngine}\nvoice_speed\t${voiceSpeed}`;
-        const colNames = `#id#\tchinese\tenglish`;
-        const rows = auditResults.map(r => [`#${r.id}#`, normalizeChinese(r.chinese), normalizeEnglish(r.correctedEnglish)].join('\t'));
-        const content = [header, colNames, ...rows].join('\n');
-        zip.file('copy.tsv', content);
-      } else {
-        const content = JSON.stringify(
-          {
-            voice_id: voiceId,
-            voice_engine: voiceEngine,
-            voice_speed: voiceSpeed,
-            items: auditResults.map(r => ({ id: `#${r.id}#`, chinese: normalizeChinese(r.chinese), english: normalizeEnglish(r.correctedEnglish) })),
-          },
-          null, 2
-        );
-        zip.file('copy.json', content);
-      }
+      const header = `voice_id\t${voiceId}\nvoice_engine\t${voiceEngine}\nvoice_speed\t${voiceSpeed}`;
+      const colNames = `#id#\tchinese\tenglish`;
+      const rows = auditResults.map(r => [`#${r.id}#`, normalizeChinese(r.chinese), normalizeEnglish(r.correctedEnglish)].join('\t'));
+      const content = [header, colNames, ...rows].join('\n');
+      zip.file('copy.tsv', content);
 
       // 2. matched images — renamed
       const images = zip.folder('images')!;
@@ -955,7 +931,7 @@ export default function App() {
                   <div className="space-y-3">
                     <h2 className="text-[10px] font-black text-neutral-400 uppercase tracking-widest flex items-center gap-2">
                       <Settings2 className="w-3 h-3" />
-                      AI 引擎配置（文案质检 + 图片匹配）
+                      AI 引擎配置（文案质检）
                     </h2>
                     <div className="flex gap-1 bg-neutral-100 p-1 rounded-xl">
                       <button 
@@ -1058,25 +1034,12 @@ export default function App() {
                           className="w-full px-3 py-2 rounded-xl border border-neutral-200 text-[10px] outline-none bg-neutral-50 focus:ring-2 focus:ring-blue-500"
                         />
                         <p className="text-[8px] text-neutral-400 px-1">
-                          使用 Meta Model API（dev.meta.ai 获取 Key），模型 {META_MODEL_ID}；质检与图片匹配均直连 Meta API。
+                          使用 Meta Model API（dev.meta.ai 获取 Key），模型 {META_MODEL_ID}；质检直连 Meta API。
                         </p>
                       </div>
                     )}
                   </div>
 
-                  {/* Rules */}
-                  <div className="space-y-3 pt-4 border-t border-neutral-100">
-                    <h2 className="text-[10px] font-black text-neutral-400 uppercase tracking-widest flex items-center gap-2">
-                      <Wand2 className="w-3 h-3" />
-                      匹配规则
-                    </h2>
-                    <textarea
-                      value={customMatchingRules}
-                      onChange={(e) => setCustomMatchingRules(e.target.value)}
-                      placeholder="输入自定义匹配逻辑..."
-                      className="w-full h-24 px-3 py-2 rounded-xl border border-neutral-200 focus:ring-2 focus:ring-blue-500 outline-none text-[10px] leading-relaxed resize-none bg-neutral-50"
-                    />
-                  </div>
 
                   <div className="pt-6 border-t border-neutral-100">
                     <button
@@ -1384,20 +1347,12 @@ export default function App() {
                           className="text-xs font-medium text-neutral-700 outline-none border border-neutral-200 rounded-lg px-2.5 py-1.5 w-52 focus:border-blue-400"
                         />
                         <button
-                          onClick={() => bundleDownload('tsv')}
+                          onClick={() => bundleDownload()}
                           disabled={isBundling}
                           className="text-xs font-bold text-green-600 hover:underline flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-wait"
                         >
                           <Download className="w-3.5 h-3.5" />
                           {isBundling ? '打包中…' : '打包下载 (TSV)'}
-                        </button>
-                        <button
-                          onClick={() => bundleDownload('json')}
-                          disabled={isBundling}
-                          className="text-xs font-bold text-neutral-500 hover:underline flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-wait"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                          {isBundling ? '打包中…' : '打包下载 (JSON)'}
                         </button>
                       </div>
                     </div>
@@ -1619,9 +1574,8 @@ export default function App() {
                 </button>
                 <button
                   onClick={() => {
-                    const fmt = unmatchedWarning.format;
                     setUnmatchedWarning(null);
-                    performBundleDownload(fmt);
+                    performBundleDownload();
                   }}
                   className="flex-[2] py-3 bg-amber-500 text-white rounded-xl text-xs font-bold hover:bg-amber-600 shadow-lg shadow-amber-100"
                 >
